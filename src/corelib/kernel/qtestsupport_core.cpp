@@ -9,7 +9,14 @@ using namespace std::chrono_literals;
 
 // Assert that this instantiation of std::atomic is always lock-free so we
 // know that no code will execute on destruction.
+//
+// On 32-bit MCUs (Zephyr / Cortex-M etc.) 64-bit atomics are not hardware
+// lock-free; libatomic emulates them with a global lock and the QTest
+// support code is unreachable from a Zephyr firmware anyway, so let the
+// assert lapse there.
+#ifndef Q_OS_ZEPHYR
 static_assert(std::atomic<std::chrono::milliseconds>::is_always_lock_free);
+#endif
 
 QT_BEGIN_NAMESPACE
 

@@ -37,6 +37,16 @@ else()
     set(QNX 0)
 endif()
 
+# Zephyr detection: matches v6.11.0's per-platform if/else style.  Triggers
+# the qzephyr platform plugin subdirectory + (when QT_DEFER_ZEPHYR_RUNTIME
+# is not set) the Zephyr corelib event dispatcher.  Setting -DZEPHYR_BASE
+# alone is enough; CMAKE_SYSTEM_NAME=Zephyr is the cross-build path.
+if(CMAKE_SYSTEM_NAME STREQUAL "Zephyr" OR DEFINED ZEPHYR_BASE)
+    set(ZEPHYR 1)
+else()
+    set(ZEPHYR 0)
+endif()
+
 if(CMAKE_SYSTEM_NAME STREQUAL "OpenBSD")
     set(OPENBSD 1)
 else()

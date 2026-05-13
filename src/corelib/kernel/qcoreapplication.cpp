@@ -58,7 +58,12 @@
 #   include "qeventdispatcher_glib_p.h"
 #  endif
 # endif
-# if !defined(Q_OS_WASM)
+// On Zephyr we use qeventdispatcher_zephyr; the UNIX dispatcher's
+// private header pulls in qtimerinfo_unix_p.h / qcore_unix_p.h which
+// depend on UNIX-only primitives this port excludes.  qcoreapplication
+// itself does not name QEventDispatcherUNIX so the include is unused
+// here.
+# if !defined(Q_OS_WASM) && !defined(Q_OS_ZEPHYR)
 #  include "qeventdispatcher_unix_p.h"
 # endif
 #endif

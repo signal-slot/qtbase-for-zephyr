@@ -13,7 +13,17 @@ if(__qt_Core_targets_file_included)
     unset(__qt_core_aliased_target)
     @qtcore_namespace_definition@
     set_property(TARGET ${__qt_core_target} APPEND PROPERTY INTERFACE_COMPILE_DEFINITIONS $<$<NOT:$<CONFIG:Debug>>:QT_NO_DEBUG>)
-    set_property(TARGET ${__qt_core_target} PROPERTY INTERFACE_COMPILE_FEATURES cxx_decltype)
+    # Setting INTERFACE_COMPILE_FEATURES requires CMake to know the
+    # feature for the active CXX compiler.  Zephyr's arm-zephyr-eabi
+    # toolchain leaves CMAKE_CXX_COMPILE_FEATURES empty (Zephyr forces
+    # CMAKE_SYSTEM_NAME=Generic and manages -std= flags itself), so
+    # propagating cxx_decltype turns into a hard configure error in
+    # any downstream find_package(Qt6) consumer.  Skip on Zephyr —
+    # detected via the ZEPHYR_BASE variable that find_package(Zephyr)
+    # always defines before the user's find_package(Qt6) runs.
+    if(NOT DEFINED ZEPHYR_BASE)
+        set_property(TARGET ${__qt_core_target} PROPERTY INTERFACE_COMPILE_FEATURES cxx_decltype)
+    endif()
 endif()
 
 # note: all the other AUTOMOC_MACRO_NAMES are already set by upstream CMake

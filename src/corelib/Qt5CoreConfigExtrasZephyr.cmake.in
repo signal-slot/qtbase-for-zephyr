@@ -1,0 +1,95 @@
+# Qt5Core Configuration for Zephyr Applications
+
+# Set up include directories for Zephyr
+set(Qt5Core_ZEPHYR_INCLUDE_DIRS
+    ${Qt5Core_INCLUDE_DIRS}
+    ${Qt5Core_PRIVATE_INCLUDE_DIRS}
+)
+
+# Zephyr-specific compile definitions
+set(Qt5Core_ZEPHYR_COMPILE_DEFINITIONS
+    QT_NO_EXCEPTIONS
+    QT_NO_DYNAMIC_CAST
+    QT_NO_PROCESS
+    QT_NO_FILESYSTEMWATCHER
+    QT_NO_FILESYSTEMENGINE
+    QT_NO_STANDARDPATHS
+    QT_NO_TRANSLATION
+    QT_NO_SETTINGS
+    QT_NO_DATASTREAM
+    QT_NO_TEXTCODEC
+    QT_NO_CODECS
+    QT_NO_LOCALE
+    QT_NO_SYSTEMLOCALE
+    QT_NO_GEOM_VARIANT
+    QT_NO_COMPRESS
+    QT_NO_THREAD
+    QT_NO_CONCURRENT
+    QT_NO_SHAREDMEMORY
+    QT_NO_SYSTEMSEMAPHORE
+    QT_NO_REGULAREXPRESSION
+    QT_NO_TEMPORARYFILE
+    QT_NO_LIBRARY
+    QT_NO_PLUGIN
+    QT_NO_QOBJECT_CHECK
+    QT_NO_BEARERMANAGEMENT
+    QT_ZEPHYR
+)
+
+# Zephyr-specific link flags
+set(Qt5Core_ZEPHYR_LINK_FLAGS
+    -nostdlib
+    -static
+)
+
+# Function to set up a Zephyr Qt application
+function(qt5_zephyr_setup_target target)
+    # Add compile definitions
+    target_compile_definitions(${target} PRIVATE ${Qt5Core_ZEPHYR_COMPILE_DEFINITIONS})
+    
+    # Add include directories
+    target_include_directories(${target} PRIVATE ${Qt5Core_ZEPHYR_INCLUDE_DIRS})
+    
+    # Set C++ standard
+    set_target_properties(${target} PROPERTIES
+        CXX_STANDARD 17
+        CXX_STANDARD_REQUIRED ON
+        CXX_EXTENSIONS OFF
+    )
+    
+    # Add compile options
+    target_compile_options(${target} PRIVATE
+        -fno-exceptions
+        -fno-rtti
+        -fno-threadsafe-statics
+        -ffunction-sections
+        -fdata-sections
+    )
+    
+    # Add link options
+    target_link_options(${target} PRIVATE
+        -Wl,--gc-sections
+        ${Qt5Core_ZEPHYR_LINK_FLAGS}
+    )
+endfunction()
+
+# Macro to add Qt resources to a Zephyr application
+macro(qt5_zephyr_add_resources target)
+    message(WARNING "Qt resources are not supported in Zephyr builds")
+endmacro()
+
+# Check if we're building for Zephyr
+if(DEFINED ZEPHYR_BASE)
+    set(QT_ZEPHYR_BUILD TRUE)
+    
+    # Override some Qt5Core variables for Zephyr
+    set(Qt5Core_LIBRARIES 
+        ${Qt5Core_LIBRARIES}
+        # Add any Zephyr-specific libraries here if needed
+    )
+    
+    # Inform the user
+    message(STATUS "Qt5Core configured for Zephyr RTOS")
+    message(STATUS "  Include dirs: ${Qt5Core_ZEPHYR_INCLUDE_DIRS}")
+    message(STATUS "  Compile defs: ${Qt5Core_ZEPHYR_COMPILE_DEFINITIONS}")
+endif()

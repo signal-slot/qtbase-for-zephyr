@@ -259,7 +259,15 @@ qt_internal_add_module(Core
         text/qvsnprintf.cpp
         thread/qatomic.h
         thread/qatomic_cxx11.h
-        thread/qatomicwait.cpp thread/qatomicwait_p.h
+        # qatomicwait.cpp / qsemaphore.cpp depend on std::mutex /
+        # std::condition_variable from libstdc++.  On bare-metal toolchains
+        # (e.g. Zephyr SDK arm-zephyr-eabi gcc 14) the shipped libstdc++ is
+        # built single-threaded (_GLIBCXX_HAS_GTHREADS undefined), so those
+        # types are not exposed nor are their runtime bodies in the
+        # archive.  They are also genuine threading primitives, so move
+        # them into the QT_FEATURE_thread block below.  Headers stay
+        # unconditional so other consumers can keep including them.
+        thread/qatomicwait_p.h
         thread/qbasicatomic.h
         thread/qgenericatomic.h
         thread/qlocking_p.h
@@ -270,7 +278,7 @@ qt_internal_add_module(Core
         thread/qthread.cpp thread/qthread.h thread/qthread_p.h
         thread/qthreadstorage.h
         thread/qthreadpool.cpp thread/qthreadpool_p.h thread/qthreadpool.h
-        thread/qsemaphore.cpp thread/qsemaphore.h
+        thread/qsemaphore.h
         thread/qtsan_impl.h
         thread/qwaitcondition.h thread/qwaitcondition_p.h
         thread/qyieldcpu.h
@@ -791,7 +799,17 @@ qt_internal_extend_target(Core CONDITION QT_FEATURE_journald
         PkgConfig::Libsystemd
 )
 
-qt_internal_extend_target(Core CONDITION UNIX
+# Qt's file engine vtable (QFSFileEngine + QFSFileEngineIterator) lives
+# half in qfsfileengine.cpp / qfsfileengine_iterator.cpp and half in the
+# Unix-specific .cpp.  The base class references the derived methods
+# unconditionally (vtable + helper functions), so excluding the *_unix
+# TUs leaves QFSFileEngine half-defined.  Keep them on Zephyr too and
+# rely on weak link-time stubs for the handful of libc symbols
+# (truncate, flock, gethostname, ...) the Zephyr application provides
+# in src/posix_stubs.c.  qthread_unix.cpp and qtimerinfo_unix.cpp pull
+# in real pthread / unix-poll plumbing that Zephyr's own dispatcher
+# replaces, so those stay UNIX-only.
+qt_internal_extend_target(Core CONDITION UNIX OR CMAKE_SYSTEM_NAME STREQUAL "Zephyr"
     SOURCES
         io/qfilesystemengine_unix.cpp
         io/qfilesystemiterator_unix.cpp
@@ -799,6 +817,10 @@ qt_internal_extend_target(Core CONDITION UNIX
         io/qlockfile_unix.cpp
         kernel/qcore_unix.cpp kernel/qcore_unix_p.h
         kernel/qpoll_p.h
+)
+
+qt_internal_extend_target(Core CONDITION UNIX
+    SOURCES
         kernel/qtimerinfo_unix.cpp kernel/qtimerinfo_unix_p.h
         thread/qthread_unix.cpp
 )
@@ -817,10 +839,12 @@ qt_internal_extend_target(Core CONDITION UNIX AND NOT WASM
 qt_internal_extend_target(Core CONDITION QT_FEATURE_thread
     SOURCES
         thread/qatomic.cpp
+        thread/qatomicwait.cpp
         thread/qfutex_p.h
         thread/qlatch.cpp thread/qlatch_p.h
         thread/qmutex.cpp thread/qmutex_p.h
         thread/qreadwritelock.cpp thread/qreadwritelock_p.h
+        thread/qsemaphore.cpp
         thread/qthreadstorage.cpp thread/qthreadstorage_p.h
 )
 
@@ -942,7 +966,8 @@ qt_internal_extend_target(Core CONDITION APPLE
         text/qlocale_mac.mm
 )
 
-qt_internal_extend_target(Core CONDITION UNIX AND NOT APPLE AND NOT WASM
+qt_internal_extend_target(Core
+    CONDITION (UNIX AND NOT APPLE AND NOT WASM) OR CMAKE_SYSTEM_NAME STREQUAL "Zephyr"
     SOURCES
         text/qlocale_unix.cpp
 )
@@ -981,7 +1006,7 @@ qt_internal_extend_target(Core CONDITION MACOS AND NOT QT_FEATURE_icu
         text/qcollator_macx.cpp
 )
 
-qt_internal_extend_target(Core CONDITION UNIX AND NOT MACOS AND NOT QT_FEATURE_icu
+qt_internal_extend_target(Core CONDITION (UNIX OR CMAKE_SYSTEM_NAME STREQUAL "Zephyr") AND NOT MACOS AND NOT QT_FEATURE_icu
     SOURCES
         text/qcollator_posix.cpp
 )
@@ -1343,7 +1368,7 @@ qt_internal_extend_target(Core CONDITION QT_FEATURE_sysv_sem
         ipc/qsystemsemaphore_systemv.cpp
 )
 
-qt_internal_extend_target(Core CONDITION VXWORKS
+qt_internal_extend_target(Core CONDITION VXWORKS OR CMAKE_SYSTEM_NAME STREQUAL "Zephyr"
     SOURCES
         io/qstandardpaths_unix.cpp
         io/qstorageinfo_stub.cpp
@@ -1535,6 +1560,22 @@ qt_internal_extend_target(Core CONDITION WASM
         platform/wasm/qwasmsuspendresumecontrol.cpp platform/wasm/qwasmsuspendresumecontrol_p.h
         platform/wasm/qwasmlocalfileengine.cpp platform/wasm/qwasmlocalfileengine_p.h
         kernel/qeventdispatcher_wasm.cpp kernel/qeventdispatcher_wasm_p.h
+)
+
+qt_internal_extend_target(Core CONDITION
+    "CMAKE_SYSTEM_NAME STREQUAL Zephyr AND NOT QT_DEFER_ZEPHYR_RUNTIME"
+    SOURCES
+        kernel/qeventdispatcher_zephyr.cpp kernel/qeventdispatcher_zephyr_p.h
+)
+
+# Zephyr libc / POSIX stubs.  These weak definitions land in
+# libQt6Core.a so every Qt-on-Zephyr application links without
+# shipping its own posix_stubs.c -- they cover what Zephyr's
+# bare-metal newlib does not (identity / fs accessors) plus the
+# mmap/sysconf surface qtdeclarative's WTF::OSAllocator needs.
+qt_internal_extend_target(Core CONDITION CMAKE_SYSTEM_NAME STREQUAL "Zephyr"
+    SOURCES
+        global/qzephyr_libc_stubs.cpp
 )
 
 qt_internal_extend_target(Core CONDITION QT_FEATURE_ctf

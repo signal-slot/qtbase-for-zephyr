@@ -29,13 +29,18 @@ static QTimeZonePrivate *newBackendTimeZone()
     return new QMacTimeZonePrivate();
 #elif defined(Q_OS_ANDROID)
     return new QAndroidTimeZonePrivate();
-#elif defined(Q_OS_UNIX) && !defined(Q_OS_VXWORKS)
+#elif defined(Q_OS_UNIX) && !defined(Q_OS_VXWORKS) && !defined(Q_OS_ZEPHYR)
     return new QTzTimeZonePrivate();
 #elif QT_CONFIG(icu)
     return new QIcuTimeZonePrivate();
 #elif defined(Q_OS_WIN)
     return new QWinTimeZonePrivate();
 #else
+    // Zephyr falls through here: the QTzTimeZonePrivate backend wants
+    // /etc/localtime + /usr/share/zoneinfo, which a bare-metal RTOS
+    // does not have, and qtimezoneprivate_tz.cpp is intentionally
+    // excluded from the Cortex-M7 Stage 1 build.  QUtcTimeZonePrivate
+    // is the safe portable fallback (always UTC, no filesystem).
     return new QUtcTimeZonePrivate();
 #endif // Backend selection
 }
@@ -50,7 +55,7 @@ static QTimeZonePrivate *newBackendTimeZone(const QByteArray &ianaId)
     return new QMacTimeZonePrivate(ianaId);
 #elif defined(Q_OS_ANDROID)
     return new QAndroidTimeZonePrivate(ianaId);
-#elif defined(Q_OS_UNIX) && !defined(Q_OS_VXWORKS)
+#elif defined(Q_OS_UNIX) && !defined(Q_OS_VXWORKS) && !defined(Q_OS_ZEPHYR)
     return new QTzTimeZonePrivate(ianaId);
 #elif QT_CONFIG(icu)
     return new QIcuTimeZonePrivate(ianaId);
