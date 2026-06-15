@@ -330,3 +330,12 @@ void QEventDispatcherZephyr::interrupt()
 }
 
 QT_END_NAMESPACE
+
+// Q_OBJECT lives in the _p.h private header; include its moc here so the
+// metaobject AND this polymorphic class's vtable (whose key function is
+// moc-generated) are emitted in this TU.  Matches the upstream idiom used by
+// qeventdispatcher_unix.cpp etc.  When qtbase builds this TU itself
+// (QT_DEFER_ZEPHYR_RUNTIME=OFF) its AUTOMOC produces the moc; in the deferred
+// Stage-2 Zephyr app build, where the app target's AUTOMOC is disabled, the
+// qt-zephyr-port module generates this moc explicitly (see its CMakeLists).
+#include "moc_qeventdispatcher_zephyr_p.cpp"
