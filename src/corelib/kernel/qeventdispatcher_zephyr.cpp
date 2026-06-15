@@ -69,6 +69,13 @@ QEventDispatcherZephyrPrivate::~QEventDispatcherZephyrPrivate()
         delete info;
     }
     timerDict.clear();
+    // The dispatcher is being destroyed, so the kernel can no longer reach
+    // these timers -- the storage that was kept alive for recycling (retired
+    // but not-yet-recycled, plus the idle free pool) is finally released.
+    qDeleteAll(pendingRecycle);
+    pendingRecycle.clear();
+    qDeleteAll(freePool);
+    freePool.clear();
 }
 
 int QEventDispatcherZephyrPrivate::dispatchTimers()
@@ -111,6 +118,11 @@ bool QEventDispatcherZephyr::processEvents(QEventLoop::ProcessEventsFlags flags)
 {
     Q_D(QEventDispatcherZephyr);
 
+    // Quiescent point: recycle any timers retired during a previous iteration.
+    // By now k_timer_stop() has settled and no timer-ISR work references them,
+    // so their storage can safely re-enter the free pool for reuse.
+    d->recyclePending();
+
     if (d->interrupt.fetchAndStoreRelaxed(0))
         return false;
 
@@ -142,6 +154,16 @@ bool QEventDispatcherZephyr::processEvents(QEventLoop::ProcessEventsFlags flags)
                 haveTimerDeadline = true;
             }
         }
+
+        // Bound the block to 50 ms.  QtQuick's basic render loop drives
+        // continuous animation by re-arming a short (~16 ms) update timer each
+        // frame; if that chain ever lapses, only the app's long-interval timers
+        // remain and the loop would sleep for seconds, so the UI updates only
+        // when an input (touch) happens to wake it.  Capping the wait makes the
+        // loop re-check ~20x/s, so animations advance and repaint without input.
+        const k_timeout_t cap = K_MSEC(50);
+        if (!haveTimerDeadline || wait_timeout.ticks > cap.ticks)
+            wait_timeout = cap;
 
         emit aboutToBlock();
 
@@ -185,11 +207,12 @@ void QEventDispatcherZephyr::registerTimer(Qt::TimerId timerId, Duration interva
     Q_D(QEventDispatcherZephyr);
     Q_ASSERT(object);
 
-    auto *info = new ZephyrTimerInfo;
+    ZephyrTimerInfo *info = d->acquireTimerInfo();
     info->obj = object;
     info->timerId = timerId;
     info->interval = interval;
     info->timerType = timerType;
+    info->expired.storeRelaxed(0);
 
     k_timer_init(&info->timer, &QEventDispatcherZephyrPrivate::timerCallback, nullptr);
     k_timer_user_data_set(&info->timer, info);
@@ -209,14 +232,44 @@ void QEventDispatcherZephyr::registerTimer(Qt::TimerId timerId, Duration interva
     k_timer_start(&info->timer, K_MSEC(clamped), K_MSEC(clamped));
 }
 
+// Hand out storage for a new timer, reusing a recycled ZephyrTimerInfo when
+// one is idle so that timer memory is never round-tripped through the heap.
+ZephyrTimerInfo *QEventDispatcherZephyrPrivate::acquireTimerInfo()
+{
+    if (!freePool.isEmpty())
+        return freePool.takeLast();
+    return new ZephyrTimerInfo;
+}
+
+// Stop a timer and park its ZephyrTimerInfo for deferred recycling.  Reusing
+// the storage immediately would race the kernel timeout subsystem (the
+// embedded k_timer's _timeout dnode may still be touched right after stop);
+// recyclePending() returns it to the free pool at the top of the next
+// processEvents() iteration, a quiescent point on the dispatcher thread.  The
+// storage is never freed back to the heap, so even a stray late kernel write
+// only ever lands on an inert k_timer.
+void QEventDispatcherZephyrPrivate::retireTimer(ZephyrTimerInfo *info)
+{
+    k_timer_stop(&info->timer);
+    info->obj = nullptr;          // ignore any stray late expiry in dispatchTimers
+    pendingRecycle.append(info);
+}
+
+void QEventDispatcherZephyrPrivate::recyclePending()
+{
+    if (pendingRecycle.isEmpty())
+        return;
+    freePool.append(pendingRecycle);
+    pendingRecycle.clear();
+}
+
 bool QEventDispatcherZephyr::unregisterTimer(Qt::TimerId timerId)
 {
     Q_D(QEventDispatcherZephyr);
     ZephyrTimerInfo *info = d->timerDict.take(timerId);
     if (!info)
         return false;
-    k_timer_stop(&info->timer);
-    delete info;
+    d->retireTimer(info);
     return true;
 }
 
@@ -231,8 +284,7 @@ bool QEventDispatcherZephyr::unregisterTimers(QObject *object)
         ZephyrTimerInfo *info = d->timerDict.value(id);
         if (info && info->obj == object) {
             d->timerDict.remove(id);
-            k_timer_stop(&info->timer);
-            delete info;
+            d->retireTimer(info);
             any = true;
         }
     }
