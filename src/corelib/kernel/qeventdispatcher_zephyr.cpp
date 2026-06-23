@@ -6,6 +6,7 @@
 
 #include <QtCore/qcoreapplication.h>
 #include <QtCore/qsocketnotifier.h>
+#include <QtCore/qvarlengtharray.h>
 #include <QtCore/qthread.h>
 #include <QtCore/private/qcoreapplication_p.h>
 #include <QtCore/private/qthread_p.h>
@@ -19,6 +20,7 @@ extern "C" __attribute__((weak)) void qzephyr_drain_qpa_events();
 
 #include <zephyr/kernel.h>
 
+#include <poll.h>
 #include <chrono>
 #include <limits>
 
@@ -137,6 +139,7 @@ bool QEventDispatcherZephyr::processEvents(QEventLoop::ProcessEventsFlags flags)
     QCoreApplicationPrivate::sendPostedEvents(nullptr, 0, thisThreadData);
 
     int nevents = d->dispatchTimers();
+    nevents += d->activateSocketNotifiers();
 
     const bool canWait = (flags & QEventLoop::WaitForMoreEvents)
                          && !d->interrupt.loadRelaxed()
@@ -182,6 +185,7 @@ bool QEventDispatcherZephyr::processEvents(QEventLoop::ProcessEventsFlags flags)
             qzephyr_drain_qpa_events();
         QCoreApplicationPrivate::sendPostedEvents(nullptr, 0, thisThreadData);
         nevents += d->dispatchTimers();
+        nevents += d->activateSocketNotifiers();
     }
 
     return nevents > 0;
@@ -189,16 +193,59 @@ bool QEventDispatcherZephyr::processEvents(QEventLoop::ProcessEventsFlags flags)
 
 void QEventDispatcherZephyr::registerSocketNotifier(QSocketNotifier *notifier)
 {
-    // Zephyr's POSIX subset doesn't surface socket fds in a way that maps
-    // cleanly onto QSocketNotifier semantics.  Apps that need network IO
-    // go through Qt's high-level QNetwork* classes which do not depend on
-    // a working socket notifier on this platform.
-    Q_UNUSED(notifier);
+    Q_D(QEventDispatcherZephyr);
+    Q_ASSERT(notifier);
+    d->socketNotifiers.append(notifier);
 }
 
 void QEventDispatcherZephyr::unregisterSocketNotifier(QSocketNotifier *notifier)
 {
-    Q_UNUSED(notifier);
+    Q_D(QEventDispatcherZephyr);
+    d->socketNotifiers.removeOne(notifier);
+}
+
+int QEventDispatcherZephyrPrivate::activateSocketNotifiers()
+{
+    if (socketNotifiers.isEmpty())
+        return 0;
+
+    const int n = socketNotifiers.size();
+    QVarLengthArray<struct pollfd, 8> fds(n);
+    for (int i = 0; i < n; ++i) {
+        fds[i].fd = static_cast<int>(socketNotifiers[i]->socket());
+        fds[i].revents = 0;
+        switch (socketNotifiers[i]->type()) {
+        case QSocketNotifier::Read:
+            fds[i].events = POLLIN;
+            break;
+        case QSocketNotifier::Write:
+            fds[i].events = POLLOUT;
+            break;
+        case QSocketNotifier::Exception:
+            fds[i].events = POLLPRI;
+            break;
+        }
+    }
+
+    int ret = ::poll(fds.data(), n, 0);
+    if (ret <= 0)
+        return 0;
+
+    QVarLengthArray<QSocketNotifier *, 8> ready;
+    for (int i = 0; i < n; ++i) {
+        if (fds[i].revents != 0)
+            ready.append(socketNotifiers[i]);
+    }
+
+    int activated = 0;
+    for (QSocketNotifier *sn : ready) {
+        if (!socketNotifiers.contains(sn))
+            continue;
+        QEvent event(QEvent::SockAct);
+        QCoreApplication::sendEvent(sn, &event);
+        ++activated;
+    }
+    return activated;
 }
 
 void QEventDispatcherZephyr::registerTimer(Qt::TimerId timerId, Duration interval,

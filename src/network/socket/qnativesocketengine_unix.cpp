@@ -215,8 +215,16 @@ bool QNativeSocketEnginePrivate::createNewSocket(QAbstractSocket::SocketType soc
     }
     int protocol = 0;
 #endif // QT_NO_SCTP
+#ifdef Q_OS_ZEPHYR
+    // Zephyr's IPv6 dual-stack doesn't support IPv4-mapped addresses for
+    // broadcast/sendto; force IPv4 unless explicitly requesting IPv6.
+    int domain = (socketProtocol == QAbstractSocket::IPv6Protocol) ? AF_INET6 : AF_INET;
+    if (socketProtocol == QAbstractSocket::AnyIPProtocol)
+        socketProtocol = QAbstractSocket::IPv4Protocol;
+#else
     int domain = (socketProtocol == QAbstractSocket::IPv6Protocol
                   || socketProtocol == QAbstractSocket::AnyIPProtocol) ? AF_INET6 : AF_INET;
+#endif
     int type = (socketType == QAbstractSocket::UdpSocket) ? SOCK_DGRAM : SOCK_STREAM;
 
     int socket = qt_safe_socket(domain, type, protocol, O_NONBLOCK);

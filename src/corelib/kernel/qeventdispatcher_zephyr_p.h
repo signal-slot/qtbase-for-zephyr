@@ -18,10 +18,13 @@
 
 #include <QtCore/qabstracteventdispatcher.h>
 #include <QtCore/qhash.h>
+#include <QtCore/qlist.h>
 #include <QtCore/qatomic.h>
 #include <QtCore/private/qabstracteventdispatcher_p.h>
 
 #include <zephyr/kernel.h>
+
+class QSocketNotifier;
 
 QT_BEGIN_NAMESPACE
 
@@ -106,6 +109,9 @@ public:
 
     static void timerCallback(k_timer *timer);
     int dispatchTimers();
+
+    QList<QSocketNotifier *> socketNotifiers;
+    int activateSocketNotifiers();
 };
 
 QT_END_NAMESPACE
