@@ -1,8 +1,6 @@
-# Zephyr wrapper for Qt 6.11's official "Books" SQL example on RT1170-EVKB.
-# The Qt sample directory is consumed unmodified via qt_zephyr_app().
+# Qt "Books" SQL example on RT1170-EVKB with file-based SQLite on SD card.
 #
 # Build:
-#   QT_SAMPLE_DIR=$HOME/io/qt/release/Examples/Qt-6.11.1/sql/books \
 #   west build -b mimxrt1170_evk@B/mimxrt1176/cm7 -p always \
 #       qt5/qtbase/examples/zephyr-rt1170-books -- -DSHIELD=rk055hdmipi4ma0
 
@@ -17,15 +15,34 @@ set(CMAKE_CXX_LINK_LIBRARY_USING_WHOLE_ARCHIVE_SUPPORTED TRUE)
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(qt_books LANGUAGES CXX C)
 
-if(NOT DEFINED ENV{QT_SAMPLE_DIR})
-    message(FATAL_ERROR
-        "QT_SAMPLE_DIR is not set.  Point it at Qt's stock sql/books directory.")
-endif()
+list(APPEND CMAKE_PREFIX_PATH "$ENV{QT_ZEPHYR_PREFIX}")
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Sql)
 
-list(APPEND CMAKE_MODULE_PATH "${ZEPHYR_QT_ZEPHYR_PORT_MODULE_DIR}/cmake")
-include(QtZephyrApp)
+set(BOOKS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../sql/books")
 
-qt_zephyr_app(
-    APP_DIR $ENV{QT_SAMPLE_DIR}
-    TARGET  books
+target_sources(app PRIVATE
+    src/main.cpp
+    src/bookwindow.cpp
+    src/bookdelegate.cpp
+)
+
+target_include_directories(app PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    "${BOOKS_DIR}"
+)
+
+target_link_libraries(app PRIVATE
+    Qt6::Sql
+    Qt6::Widgets
+    Qt6::Gui
+    Qt6::Core
+)
+
+# SVG images (star.svg, star-filled.svg) used by BookDelegate
+qt_add_resources(app "books"
+    PREFIX "/"
+    BASE "${BOOKS_DIR}"
+    FILES
+        "${BOOKS_DIR}/images/star.svg"
+        "${BOOKS_DIR}/images/star-filled.svg"
 )
