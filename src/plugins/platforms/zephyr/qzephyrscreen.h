@@ -5,8 +5,12 @@
 #define QZEPHYRSCREEN_H
 
 #include <qpa/qplatformscreen.h>
+#include <QtGui/qimage.h>
+#include <QtCore/qlist.h>
 
 QT_BEGIN_NAMESPACE
+
+class QZephyrWindow;
 
 class QZephyrScreen : public QPlatformScreen
 {
@@ -19,11 +23,18 @@ public:
     QImage::Format format() const override { return m_format; }
     QSizeF physicalSize() const override { return m_physicalSize; }
 
+    void addWindow(QZephyrWindow *w);
+    void removeWindow(QZephyrWindow *w);
+    bool hasVisiblePopups() const;
+    const QImage &composite();
+
 private:
     QRect m_geometry;
     int m_depth;
     QImage::Format m_format;
     QSizeF m_physicalSize;
+    QImage m_compositeBuf;
+    QList<QZephyrWindow *> m_windows;
 };
 
 QT_END_NAMESPACE

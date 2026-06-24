@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include "qzephyrscreen.h"
+#include "qzephyrwindow.h"
+#include <QtGui/qpainter.h>
 #include <QtCore/qdebug.h>
 
 QT_BEGIN_NAMESPACE
@@ -56,6 +58,43 @@ QZephyrScreen::QZephyrScreen()
 
 QZephyrScreen::~QZephyrScreen()
 {
+}
+
+void QZephyrScreen::addWindow(QZephyrWindow *w)
+{
+    if (!m_windows.contains(w))
+        m_windows.append(w);
+}
+
+void QZephyrScreen::removeWindow(QZephyrWindow *w)
+{
+    m_windows.removeOne(w);
+}
+
+bool QZephyrScreen::hasVisiblePopups() const
+{
+    for (const QZephyrWindow *w : m_windows) {
+        if (w->isVisible() && w->isPopup())
+            return true;
+    }
+    return false;
+}
+
+const QImage &QZephyrScreen::composite()
+{
+    if (m_compositeBuf.isNull() || m_compositeBuf.size() != m_geometry.size())
+        m_compositeBuf = QImage(m_geometry.size(), m_format);
+    m_compositeBuf.fill(Qt::black);
+
+    QPainter p(&m_compositeBuf);
+    p.setCompositionMode(QPainter::CompositionMode_Source);
+    for (const QZephyrWindow *w : std::as_const(m_windows)) {
+        if (!w->isVisible() || !w->backingStoreImage())
+            continue;
+        p.drawImage(w->geometry().topLeft(), *w->backingStoreImage());
+    }
+    p.end();
+    return m_compositeBuf;
 }
 
 QT_END_NAMESPACE

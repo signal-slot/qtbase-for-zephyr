@@ -5,6 +5,7 @@
 #define QZEPHYRWINDOW_H
 
 #include <qpa/qplatformwindow.h>
+#include <QtGui/qimage.h>
 
 QT_BEGIN_NAMESPACE
 
@@ -16,14 +17,20 @@ public:
 
     void setGeometry(const QRect &rect) override;
     QRect geometry() const override;
-    
+
     WId winId() const override;
     void setVisible(bool visible) override;
+
+    bool isPopup() const;
+    bool isVisible() const { return m_visible; }
+    void setBackingStoreImage(QImage *img) { m_bsImage = img; }
+    QImage *backingStoreImage() const { return m_bsImage; }
 
 private:
     QRect m_geometry;
     bool m_visible;
     WId m_winId;
+    QImage *m_bsImage = nullptr;
 };
 
 QT_END_NAMESPACE

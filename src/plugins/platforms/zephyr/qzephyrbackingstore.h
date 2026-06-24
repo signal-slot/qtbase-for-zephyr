@@ -24,6 +24,10 @@ public:
 
 private:
     QImage m_image;
+    // Optional GC355 vg_lite paint device wrapping m_image's buffer, created via
+    // the weak Stage-2 hook qzephyr_make_vglite_paint_device() when
+    // CONFIG_QT_VGLITE_QPAINTENGINE is built in; null -> plain QImage raster.
+    QPaintDevice *m_vgliteDevice = nullptr;
 };
 
 QT_END_NAMESPACE
