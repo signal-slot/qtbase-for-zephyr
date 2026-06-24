@@ -92,13 +92,13 @@ void BookWindow::createLayout()
     gridLayout->addWidget(genreComboBox, 2, 1);
     gridLayout->addWidget(ratingLabel, 2, 2, Qt::AlignRight);
     gridLayout->addWidget(ratingComboBox, 2, 3);
-    gridLayout->addWidget(tableView, 3, 0, 1, 4, Qt::AlignCenter);
+    gridLayout->addWidget(tableView, 3, 0, 1, 4);
     gridLayout->setColumnStretch(1, 1000);
     gridLayout->setColumnStretch(3, 1000);
+    gridLayout->setRowStretch(3, 1);
 
     gridLayout->setContentsMargins(18, 18, 18, 18);
     gridLayout->setSpacing(18);
-    gridLayout->setAlignment(Qt::AlignHCenter);
 }
 
 void BookWindow::createModel()
@@ -133,16 +133,8 @@ void BookWindow::configureWidgets()
     tableView->setSelectionMode(QAbstractItemView::ExtendedSelection);
     tableView->setSelectionBehavior(QAbstractItemView::SelectRows);
 
-    // Lock and prohibit resizing of the width of the columns
-    tableView->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
+    tableView->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
     tableView->verticalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
-    tableView->horizontalHeader()->setFixedHeight(tableView->rowHeight(0));
-
-    // increment by two to consider the frame
-    tableView->setFixedWidth(tableView->horizontalHeader()->length() +
-                             tableView->verticalScrollBar()->sizeHint().width() + 2);
-    tableView->setMaximumHeight(tableView->verticalHeader()->length() +
-                                tableView->horizontalHeader()->height() + 2);
 
     authorComboBox->setModel(model->relationModel(authorIdx));
     authorComboBox->setModelColumn(model->relationModel(authorIdx)->fieldIndex("name"));
