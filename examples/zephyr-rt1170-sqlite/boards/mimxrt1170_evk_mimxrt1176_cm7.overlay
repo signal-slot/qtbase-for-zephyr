@@ -1,0 +1,3 @@
+&usdhc1 {
+	status = "okay";
+};

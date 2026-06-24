@@ -18,10 +18,17 @@ project(qt_sqlite LANGUAGES CXX C)
 list(APPEND CMAKE_PREFIX_PATH "$ENV{QT_ZEPHYR_PREFIX}")
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Sql)
 
-target_sources(app PRIVATE src/main.cpp)
+target_sources(app PRIVATE src/main.cpp src/posix_stubs.c src/sqlite_vfs_patch.c)
+target_include_directories(app PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../src/3rdparty/sqlite
+)
 target_link_libraries(app PRIVATE
     Qt6::Sql
     Qt6::Widgets
     Qt6::Gui
     Qt6::Core
 )
+
+# Wrap lseek/read to fix FatFS's refusal to seek beyond EOF (POSIX requires it)
+zephyr_link_libraries(-Wl,--wrap=lseek,--wrap=read)
+
