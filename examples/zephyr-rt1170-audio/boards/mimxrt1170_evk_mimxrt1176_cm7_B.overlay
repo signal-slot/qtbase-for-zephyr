@@ -1,0 +1,4 @@
+/* SAI1 must output MCLK to the WM8962 codec */
+&sai1 {
+	mclk-output;
+};
