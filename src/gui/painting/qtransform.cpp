@@ -547,8 +547,33 @@ QTransform & QTransform::shear(qreal sh, qreal sv)
 
     \sa setMatrix()
 */
+#ifdef Q_OS_ZEPHYR
+// Diagnostic tripwire (temporary, 2026-06-12): a soak crash on the RT1170
+// faulted inside operator*() called from rotate() with this=0x30746095 (a
+// code address) and a non-ZAxis axis -- i.e. a corrupted indirect call.
+// Every legitimate QTransform on this target lives in SEMC SDRAM
+// (0x80000000..0x84000000); report any other this pointer together with
+// the caller before the MPU fault destroys the context.  printk is weak:
+// absent in Stage-1 host links, resolved by the Zephyr kernel in Stage 2.
+extern "C" __attribute__((weak)) int printk(const char *fmt, ...);
+namespace {
+Q_NEVER_INLINE void qt_zephyr_xform_tripwire(const void *self, const void *ret, const char *fn)
+{
+    if (quintptr(self) - 0x80000000u < 0x04000000u)
+        return;
+    if (printk)
+        printk("[xform-tripwire] %s this=%p caller=%p\n", fn, self, ret);
+}
+}
+#define QT_ZEPHYR_XFORM_TRIPWIRE() \
+    qt_zephyr_xform_tripwire(this, __builtin_return_address(0), Q_FUNC_INFO)
+#else
+#define QT_ZEPHYR_XFORM_TRIPWIRE() ((void)0)
+#endif
+
 QTransform & QTransform::rotate(qreal a, Qt::Axis axis, qreal distanceToPlane)
 {
+    QT_ZEPHYR_XFORM_TRIPWIRE();
     if (a == 0)
         return *this;
 #ifndef QT_NO_DEBUG
@@ -647,6 +672,7 @@ QTransform & QTransform::rotate(qreal a, Qt::Axis axis, qreal distanceToPlane)
 */
 QTransform &QTransform::rotate(qreal a, Qt::Axis axis)
 {
+    QT_ZEPHYR_XFORM_TRIPWIRE();
     return rotate(a, axis, 1024.0);
 }
 #endif
@@ -903,6 +929,10 @@ QTransform & QTransform::operator*=(const QTransform &o)
 */
 QTransform QTransform::operator*(const QTransform &m) const
 {
+    QT_ZEPHYR_XFORM_TRIPWIRE();
+#ifdef Q_OS_ZEPHYR
+    qt_zephyr_xform_tripwire(&m, __builtin_return_address(0), "operator* rhs");
+#endif
     const TransformationType otherType = m.inline_type();
     if (otherType == TxNone)
         return *this;

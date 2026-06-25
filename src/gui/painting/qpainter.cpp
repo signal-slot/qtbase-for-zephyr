@@ -6965,6 +6965,17 @@ void QPainter::setRenderHints(RenderHints hints, bool on)
 {
     Q_D(QPainter);
 
+#ifdef Q_OS_ZEPHYR
+    // Zephyr runs on MMU-less Cortex-M class CPUs where the analytic AA
+    // rasterizer dominates QtWidgets/QGraphicsView frame time (measured
+    // ~12% of a collidingmice frame on a 1 GHz Cortex-M7).  Shape
+    // antialiasing is forced off port-wide; TextAntialiasing is kept --
+    // glyph AA comes out of the FreeType cache, not the path rasterizer.
+    hints &= ~RenderHints(Antialiasing);
+    if (!hints)
+        return;
+#endif
+
     if (!d->engine) {
         qWarning("QPainter::setRenderHint: Painter must be active to set rendering hints");
         return;

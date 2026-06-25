@@ -346,11 +346,64 @@ void QPMCache::resizeKeyArray(int size)
     keyArraySize = size;
 }
 
+#ifdef Q_OS_ZEPHYR
+// Freelist integrity check (temporary, 2026-06-13, mice heap-corruption hunt).
+// The QPMCache key freelist (keyArray/freeKey) is the prime suspect for the
+// soak crash: a double-release would push the same index twice, later handing
+// the same index to two live keys, whose keyArray[] writes then corrupt the
+// heap.  Catch the corrupting operation AT ITS SOURCE instead of chasing the
+// random downstream victim.  printk is a weak extern resolved at Stage 2.
+extern "C" __attribute__((weak)) int printk(const char *, ...);
+extern "C" __attribute__((weak)) void k_panic(void);
+static void qzephyr_freelist_check(int *keyArray, int keyArraySize, int freeKey,
+                                   int releasingIdx, const char *where)
+{
+    if (!printk)
+        return;
+    // Bounds: freeKey is a valid head (== keyArraySize means "list empty").
+    if (freeKey < 0 || freeKey > keyArraySize) {
+        printk("[pmkey] %s: freeKey=%d out of range (size=%d)\n",
+               where, freeKey, keyArraySize);
+        if (k_panic) k_panic();
+        return;
+    }
+    // Walk the freelist; detect a cycle and check releasingIdx is not already
+    // present (double-release).  Length is bounded by keyArraySize.
+    int steps = 0;
+    for (int c = freeKey; c != keyArraySize; c = keyArray[c]) {
+        if (c < 0 || c >= keyArraySize) {
+            printk("[pmkey] %s: freelist node %d out of range (size=%d)\n",
+                   where, c, keyArraySize);
+            if (k_panic) k_panic();
+            return;
+        }
+        if (releasingIdx >= 0 && c == releasingIdx) {
+            printk("[pmkey] %s: DOUBLE-RELEASE idx=%d already on freelist\n",
+                   where, releasingIdx);
+            if (k_panic) k_panic();
+            return;
+        }
+        if (++steps > keyArraySize) {
+            printk("[pmkey] %s: freelist CYCLE (size=%d)\n", where, keyArraySize);
+            if (k_panic) k_panic();
+            return;
+        }
+    }
+}
+#endif
+
 QPixmapCache::Key QPMCache::createKey()
 {
     if (freeKey == keyArraySize)
         resizeKeyArray(keyArraySize ? keyArraySize << 1 : 2);
     int id = freeKey;
+#ifdef Q_OS_ZEPHYR
+    if (id < 0 || id >= keyArraySize) {
+        if (printk) printk("[pmkey] createKey: bad head id=%d size=%d\n",
+                           id, keyArraySize);
+        if (k_panic) k_panic();
+    }
+#endif
     freeKey = keyArray[id];
     QPixmapCache::Key key;
     QPixmapCache::KeyData *d = QPMCache::getKeyData(&key);
@@ -368,6 +421,10 @@ void QPMCache::releaseKey(const QPixmapCache::Key &key)
     if (keyData->key > keyArraySize || keyData->key <= 0)
         return;
     keyData->key--;
+#ifdef Q_OS_ZEPHYR
+    qzephyr_freelist_check(keyArray, keyArraySize, freeKey, keyData->key,
+                           "releaseKey");
+#endif
     keyArray[keyData->key] = freeKey;
     freeKey = keyData->key;
     keyData->isValid = false;

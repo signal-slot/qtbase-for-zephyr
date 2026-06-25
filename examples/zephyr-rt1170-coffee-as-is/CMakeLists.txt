@@ -20,6 +20,16 @@
 #       examples/zephyr-rt1170-coffee-as-is -- -DSHIELD=rk055hdmipi4ma0
 
 cmake_minimum_required(VERSION 3.20.0)
+
+# CMake 4.x no longer auto-detects WHOLE_ARCHIVE support for the CXX link
+# language under arm-zephyr-eabi; declare it before find_package(Zephyr) so
+# qt_zephyr_app()'s $<LINK_LIBRARY:WHOLE_ARCHIVE,...> resolves.
+set(CMAKE_CXX_LINK_LIBRARY_USING_WHOLE_ARCHIVE
+    "LINKER:--push-state,--whole-archive"
+    "<LINK_ITEM>"
+    "LINKER:--pop-state")
+set(CMAKE_CXX_LINK_LIBRARY_USING_WHOLE_ARCHIVE_SUPPORTED TRUE)
+
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(qt_coffee_as_is LANGUAGES CXX C)
 
@@ -36,6 +46,6 @@ list(APPEND CMAKE_MODULE_PATH "${ZEPHYR_QT_ZEPHYR_PORT_MODULE_DIR}/cmake")
 include(QtZephyrApp)
 
 qt_zephyr_app(
-    SAMPLE_DIR $ENV{QT_SAMPLE_DIR}
-    TARGET     coffeemachine
+    APP_DIR $ENV{QT_SAMPLE_DIR}
+    TARGET  coffeemachine
 )
