@@ -1,4 +1,6 @@
-/* SAI1 must output MCLK to the WM8962 codec */
+/* SAI1 must output MCLK to the WM8962 codec.
+ * rx-sync-mode: RX reuses TX BCLK/LRCK (WM8962 ADC is clocked from TX pins). */
 &sai1 {
 	mclk-output;
+	nxp,rx-sync-mode;
 };
