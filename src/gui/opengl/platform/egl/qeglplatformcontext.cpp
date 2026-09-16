@@ -13,7 +13,9 @@
 #include <QtCore/private/qjnihelpers_p.h>
 #endif
 #ifndef Q_OS_WIN
-#include <dlfcn.h>
+#if QT_CONFIG(dlopen)
+#include <dlfcn.h>   // dlsym(RTLD_DEFAULT) fallback in getProcAddress(); absent on Zephyr (no dynamic loader)
+#endif
 #endif
 
 QT_BEGIN_NAMESPACE

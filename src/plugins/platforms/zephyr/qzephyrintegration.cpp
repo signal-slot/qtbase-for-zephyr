@@ -8,6 +8,12 @@
 
 #include <qpa/qwindowsysteminterface.h>
 #include <QtCore/qcoreapplication.h>
+#ifdef QZEPHYR_WITH_EGL
+#include "qzephyrglcontext.h"
+#include <QtGui/private/qeglpbuffer_p.h>
+#include <QtGui/qoffscreensurface.h>
+#include <QtGui/qopenglcontext.h>
+#endif
 // QFreeTypeFontDatabase is the lightweight base of QGenericUnixFontDatabase
 // (which adds fontconfig).  On Zephyr we have no fontconfig and no system
 // font directories, so the bare FreeType database is the right choice --
@@ -34,6 +40,10 @@ extern void qzephyr_sdl_pollevents();
 
 QT_BEGIN_NAMESPACE
 
+#ifdef QZEPHYR_WITH_EGL
+bool qzephyr_gl_available();   // qzephyrwindow.cpp: the Stage 2 GL hooks are linked
+#endif
+
 QZephyrIntegration::QZephyrIntegration()
     : m_primaryScreen(nullptr)
     , m_fontDb(nullptr)
@@ -44,6 +54,10 @@ QZephyrIntegration::~QZephyrIntegration()
 {
     delete m_fontDb;
     delete m_primaryScreen;
+#ifdef QZEPHYR_WITH_EGL
+    if (m_eglDisplay != EGL_NO_DISPLAY)
+        eglTerminate(m_eglDisplay);
+#endif
 }
 
 void QZephyrIntegration::initialize()
@@ -51,6 +65,23 @@ void QZephyrIntegration::initialize()
     // Create a default screen
     m_primaryScreen = new QZephyrScreen();
     QWindowSystemInterface::handleScreenAdded(m_primaryScreen);
+
+#ifdef QZEPHYR_WITH_EGL
+    // Bring the GL library up once per process.  eglInitialize() boots
+    // the GPU backend (YakoGL: OSAL + PowerVR render service), so it is
+    // deliberately skipped when the firmware has no GL hooks.
+    if (qzephyr_gl_available()) {
+        m_eglDisplay = eglGetDisplay(EGL_DEFAULT_DISPLAY);
+        EGLint major = 0, minor = 0;
+        if (m_eglDisplay == EGL_NO_DISPLAY || !eglInitialize(m_eglDisplay, &major, &minor)) {
+            qWarning("QZephyrIntegration: eglInitialize failed (0x%x); OpenGL disabled", eglGetError());
+            m_eglDisplay = EGL_NO_DISPLAY;
+        } else {
+            qDebug("QZephyrIntegration: EGL %d.%d %s", major, minor,
+                   eglQueryString(m_eglDisplay, EGL_VENDOR));
+        }
+    }
+#endif
 
 #ifdef QZEPHYR_WITH_SDL
     m_fontDb = new QFontconfigDatabase();
@@ -84,8 +115,14 @@ bool QZephyrIntegration::hasCapability(QPlatformIntegration::Capability cap) con
     case NonFullScreenWindows:
         return false;
     case OpenGL:
-        return false;  // No OpenGL support initially
+#ifdef QZEPHYR_WITH_EGL
+        return m_eglDisplay != EGL_NO_DISPLAY;
+#else
+        return false;
+#endif
     case ThreadedOpenGL:
+        return false;  // single-threaded Qt (FEATURE_thread=OFF)
+    case RasterGLSurface:
         return false;
     case SharedGraphicsCache:
         return false;
@@ -134,6 +171,29 @@ QAbstractEventDispatcher *QZephyrIntegration::createEventDispatcher() const
     return nullptr;
 #endif
 }
+
+#ifdef QZEPHYR_WITH_EGL
+QPlatformOpenGLContext *QZephyrIntegration::createPlatformOpenGLContext(QOpenGLContext *context) const
+{
+    if (m_eglDisplay == EGL_NO_DISPLAY)
+        return nullptr;
+    return new QZephyrGLContext(context->format(), context->shareHandle(), m_eglDisplay);
+}
+
+QPlatformOffscreenSurface *QZephyrIntegration::createPlatformOffscreenSurface(QOffscreenSurface *surface) const
+{
+    if (m_eglDisplay == EGL_NO_DISPLAY)
+        return nullptr;
+    return new QEGLPbuffer(m_eglDisplay, surface->requestedFormat(), surface);
+}
+
+void *QZephyrIntegration::nativeResourceForIntegration(const QByteArray &resource)
+{
+    if (resource.compare("egldisplay", Qt::CaseInsensitive) == 0)
+        return m_eglDisplay;
+    return nullptr;
+}
+#endif
 
 QPlatformFontDatabase *QZephyrIntegration::fontDatabase() const
 {

@@ -7,6 +7,9 @@
 #include <qpa/qplatformintegration.h>
 #include <qpa/qplatformnativeinterface.h>
 #include <qpa/qplatformscreen.h>
+#ifdef QZEPHYR_WITH_EGL
+#include <QtGui/private/qt_egl_p.h>
+#endif
 
 QT_BEGIN_NAMESPACE
 
@@ -33,9 +36,22 @@ public:
 
     void initialize() override;
 
+#ifdef QZEPHYR_WITH_EGL
+    // OpenGL ES 2.0 over the on-target EGL (YakoGL).  Present only when
+    // Stage 2 links the GL display hooks (qzephyr_gl_*); hasCapability
+    // reports OpenGL accordingly.
+    QPlatformOpenGLContext *createPlatformOpenGLContext(QOpenGLContext *context) const override;
+    QPlatformOffscreenSurface *createPlatformOffscreenSurface(QOffscreenSurface *surface) const override;
+    void *nativeResourceForIntegration(const QByteArray &resource) override;
+    EGLDisplay eglDisplay() const { return m_eglDisplay; }
+#endif
+
 private:
     QZephyrScreen *m_primaryScreen;
     QPlatformFontDatabase *m_fontDb;
+#ifdef QZEPHYR_WITH_EGL
+    EGLDisplay m_eglDisplay = EGL_NO_DISPLAY;
+#endif
 };
 
 QT_END_NAMESPACE

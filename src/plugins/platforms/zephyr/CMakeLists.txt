@@ -24,6 +24,19 @@ qt_internal_add_plugin(QZephyrIntegrationPlugin
         Qt::GuiPrivate
 )
 
+# OpenGL ES 2.0 through the on-target EGL (YakoGL on the AM62P).  Only
+# when Stage 1 was configured with an EGL + GLES2 provider
+# (build-qt-zephyr-am62p.sh); the Cortex-M7 raster build leaves this out
+# so libqzephyr.a carries no egl*/gl* references there.
+qt_internal_extend_target(QZephyrIntegrationPlugin CONDITION QT_FEATURE_egl AND QT_FEATURE_opengl
+    SOURCES
+        qzephyrglcontext.cpp qzephyrglcontext.h
+    DEFINES
+        QZEPHYR_WITH_EGL
+    LIBRARIES
+        EGL::EGL
+)
+
 # Zephyr specific libraries and includes
 if(ZEPHYR_BASE)
     target_include_directories(QZephyrIntegrationPlugin PRIVATE

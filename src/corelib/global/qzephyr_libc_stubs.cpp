@@ -111,6 +111,12 @@ __attribute__((weak)) long sysconf(int name)
 
 /* ----- 64-bit __atomic_* libcalls -------------------------------- */
 
+/* Only the 32-bit Cortex-M build needs these: AArch64 (Zephyr on the
+ * AM62P Cortex-A53) has native 64-bit LDXR/STXR and LSE atomics, GCC
+ * never emits the __atomic_*_8 libcalls there, and PRIMASK does not
+ * exist in the A64 instruction set. */
+#if defined(__arm__)
+
 /* Cortex-M7 has 32-bit ldrex/strex but no 64-bit atomic instructions
  * natively, so GCC emits libcalls (__atomic_*_8) for std::atomic<int64>
  * etc.  The Zephyr SDK does not ship libatomic, leaving the symbols
@@ -135,7 +141,6 @@ __attribute__((weak)) long sysconf(int name)
 
 #include <stdint.h>
 
-#if defined(__arm__) || defined(__aarch64__)
 static inline unsigned int qzephyr_atomic_lock(void)
 {
     unsigned int key;
@@ -147,13 +152,6 @@ static inline void qzephyr_atomic_unlock(unsigned int key)
 {
     __asm__ volatile ("msr PRIMASK, %0" :: "r" (key) : "memory");
 }
-#else
-/* Stage 1 builds with the arm-zephyr-eabi toolchain so this branch is
- * not reached in practice; keep it as a clear compile-time error
- * marker if anyone ports to a non-ARM core without revisiting these
- * primitives. */
-#  error "qzephyr_libc_stubs: 64-bit __atomic_*_8 stubs need IRQ-mask primitive for this arch"
-#endif
 
 #define QZ_ATOMIC_LOAD_STORE(BITS, T)                                            \
 __attribute__((weak)) T __atomic_load_##BITS(const volatile void *ptr, int)      \
@@ -223,6 +221,8 @@ QZ_ATOMIC_RMW(8, uint64_t, and,  (uint64_t)(old & val))
 QZ_ATOMIC_RMW(8, uint64_t, or,   (uint64_t)(old | val))
 QZ_ATOMIC_RMW(8, uint64_t, xor,  (uint64_t)(old ^ val))
 QZ_ATOMIC_RMW(8, uint64_t, nand, (uint64_t)~(old & val))
+
+#endif /* __arm__ (32-bit Cortex-M) */
 
 #undef QZ_ATOMIC_LOAD_STORE
 #undef QZ_ATOMIC_RMW
