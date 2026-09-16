@@ -1,0 +1,31 @@
+// Stage 1 shim: <mutex> on a libstdc++ built without gthreads (the Zephyr SDK's
+// aarch64 picolibc toolchain).  The real header still provides lock_guard and
+// unique_lock, but std::mutex itself only exists with _GLIBCXX_HAS_GTHREADS.
+// Qt is built single-threaded here (FEATURE_thread=OFF, HB_NO_MT), and the
+// bundled glslang in qtshadertools guards its symbol-table setup with a
+// std::mutex: a mutex that never contends is correct for it.  (std::call_once
+// and once_flag need no shim: this libstdc++ provides them without gthreads.)
+#pragma once
+#include_next <mutex>
+#if !defined(_GLIBCXX_HAS_GTHREADS)
+namespace std {
+class mutex {
+public:
+    constexpr mutex() noexcept = default;
+    mutex(const mutex &) = delete;
+    mutex &operator=(const mutex &) = delete;
+    void lock() {}
+    bool try_lock() { return true; }
+    void unlock() {}
+};
+class recursive_mutex {
+public:
+    recursive_mutex() = default;
+    recursive_mutex(const recursive_mutex &) = delete;
+    recursive_mutex &operator=(const recursive_mutex &) = delete;
+    void lock() {}
+    bool try_lock() { return true; }
+    void unlock() {}
+};
+} // namespace std
+#endif
