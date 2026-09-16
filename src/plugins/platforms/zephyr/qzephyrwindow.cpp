@@ -262,6 +262,16 @@ void QZephyrWindow::frameSwapped(EGLDisplay display)
     }
     m_pendingSync = eglCreateSync(display, EGL_SYNC_FENCE, nullptr);
     presentPendingWhenDone();
+
+    // Swap interval 1 (the default): pace the render loop to the panel.
+    // Rendering runs far ahead of the 58 Hz scan-out otherwise (frames
+    // nobody sees, at full CPU/GPU load), and a flip issued more than once
+    // per vsync would overrun the previous one.  QZEPHYR_NO_VSYNC=1
+    // removes the wait for throughput measurements.
+    static const bool noVsync = qEnvironmentVariableIsSet("QZEPHYR_NO_VSYNC");
+    if (!noVsync && m_buffers.size() > 1 && window()->requestedFormat().swapInterval() != 0
+        && qzephyr_gl_vsync_count && qzephyr_gl_wait_vsync)
+        qzephyr_gl_wait_vsync(qzephyr_gl_vsync_count() + 1);
 }
 
 void QZephyrWindow::presentPendingWhenDone()

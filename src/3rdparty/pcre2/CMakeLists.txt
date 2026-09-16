@@ -81,3 +81,11 @@ qt_internal_extend_target(BundledPcre2 CONDITION WIN32
 )
 
 qt_internal_apply_intel_cet(BundledPcre2 PRIVATE)
+
+# Zephyr: no executable heap on an MMU target (the JIT's code buffer is an
+# instruction abort on AArch64) and no need for it on the MCU boards;
+# QRegularExpression falls back to the interpreter.
+qt_internal_extend_target(BundledPcre2 CONDITION ZEPHYR
+    DEFINES
+        PCRE2_DISABLE_JIT
+)
