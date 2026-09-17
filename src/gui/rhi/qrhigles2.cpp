@@ -853,6 +853,19 @@ bool QRhiGles2::create(QRhi::Flags flags)
         driverInfoStruct.deviceName += QByteArray(version);
 
     caps.ctxMajor = actualFormat.majorVersion();
+    // Bring-up aid: QT_RHI_GLES_CTX_MAJOR=2 makes the backend behave as on an
+    // OpenGL ES 2.0 context whatever version the driver reports (every
+    // capability derived from the version below follows), so a driver that
+    // just started reporting 3.0 can be bisected against its 2.0 behaviour.
+    if (qEnvironmentVariableIsSet("QT_RHI_GLES_CTX_MAJOR")) {
+        const int forced = qEnvironmentVariableIntValue("QT_RHI_GLES_CTX_MAJOR");
+        if (forced >= 2 && forced <= caps.ctxMajor) {
+            qWarning("QRhiGles2: context major version %d forced to %d", caps.ctxMajor, forced);
+            caps.ctxMajor = forced;
+            if (forced < 3)
+                caps.ctxMinor = 0;
+        }
+    }
     caps.ctxMinor = actualFormat.minorVersion();
 
     GLint n = 0;
@@ -1194,6 +1207,31 @@ bool QRhiGles2::create(QRhi::Flags flags)
         }
     } else {
         caps.sampleVariables = caps.ctxMajor >= 4;
+    }
+
+    // Bring-up aid: QT_RHI_GLES_DISABLE_CAPS=name,name,... clears single
+    // capabilities (the field names of Caps) to bisect a driver problem.
+    if (qEnvironmentVariableIsSet("QT_RHI_GLES_DISABLE_CAPS")) {
+        const QList<QByteArray> names = qgetenv("QT_RHI_GLES_DISABLE_CAPS").split(',');
+        for (const QByteArray &raw : names) {
+            const QByteArray n = raw.trimmed();
+            bool hit = true;
+#define QRHI_GLES_DISABLE(field) if (n == #field) caps.field = false; else
+            QRHI_GLES_DISABLE(instancing) QRHI_GLES_DISABLE(properMapBuffer) QRHI_GLES_DISABLE(elementIndexUint)
+            QRHI_GLES_DISABLE(rgba8Format) QRHI_GLES_DISABLE(r8Format) QRHI_GLES_DISABLE(npotTextureFull)
+            QRHI_GLES_DISABLE(texelFetch) QRHI_GLES_DISABLE(intAttributes) QRHI_GLES_DISABLE(nonBaseLevelFramebufferTexture)
+            QRHI_GLES_DISABLE(fixedIndexPrimitiveRestart) QRHI_GLES_DISABLE(unpackRowLength) QRHI_GLES_DISABLE(packedDepthStencil)
+            QRHI_GLES_DISABLE(depth24) QRHI_GLES_DISABLE(uniformBuffers) QRHI_GLES_DISABLE(floatFormats)
+            QRHI_GLES_DISABLE(depthTexture) QRHI_GLES_DISABLE(msaaRenderBuffer) QRHI_GLES_DISABLE(halfAttributes)
+            QRHI_GLES_DISABLE(textureCompareMode) QRHI_GLES_DISABLE(programBinary) QRHI_GLES_DISABLE(screenSpaceDerivatives)
+            QRHI_GLES_DISABLE(texture3D) QRHI_GLES_DISABLE(multisampledTexture)
+            hit = false;
+#undef QRHI_GLES_DISABLE
+            if (hit)
+                qWarning("QRhiGles2: capability %s disabled", n.constData());
+            else if (!n.isEmpty())
+                qWarning("QRhiGles2: unknown capability %s", n.constData());
+        }
     }
 
     nativeHandlesStruct.context = ctx;
