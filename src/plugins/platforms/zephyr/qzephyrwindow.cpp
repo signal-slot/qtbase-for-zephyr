@@ -156,7 +156,11 @@ bool QZephyrWindow::createSurfaces(EGLDisplay display, EGLConfig config)
     m_current = 0;
     m_pending = -1;
     m_onScreen = -1;
-    if (qEnvironmentVariableIsSet("QZEPHYR_FRAME_LOG") && qzephyr_gl_debug_set)
+    // The per-draw dump is thousands of console lines, and the console is
+    // synchronous at 115200 baud: it delays the first frames by ten seconds and
+    // more, which the lab harness sees as an application that never draws. It
+    // is a bring-up tool now, asked for by name.
+    if (qEnvironmentVariableIsSet("QZEPHYR_GL_DUMP") && qzephyr_gl_debug_set)
         qzephyr_gl_debug_set(1);   // dump the first frames' draws; frameSwapped() turns it off
     return true;
 }
