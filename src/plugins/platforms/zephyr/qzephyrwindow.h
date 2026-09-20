@@ -5,6 +5,7 @@
 #define QZEPHYRWINDOW_H
 
 #include <qpa/qplatformwindow.h>
+#include <QElapsedTimer>
 #ifdef QZEPHYR_WITH_EGL
 #include <QtCore/qvarlengtharray.h>
 #include <QtGui/private/qt_egl_p.h>   // EGL/egl.h + the GL library's eglplatform.h (struct gles_native_window)
@@ -55,6 +56,10 @@ private:
     EGLSync m_pendingSync = EGL_NO_SYNC;   // completion of the frame in m_pending
     int m_current = 0;     // buffer the next frame renders into
     int m_pending = -1;    // buffer whose frame is submitted but not yet shown
+    // QZEPHYR_FRAME_LOG: where a frame's wall clock went
+    QElapsedTimer m_swapClock;
+    qint64 m_lastBufferWaitMs = 0;
+    qint64 m_lastSwapMs = 0;
     int m_onScreen = -1;   // buffer the display scans out
     bool m_pollScheduled = false;
 #endif

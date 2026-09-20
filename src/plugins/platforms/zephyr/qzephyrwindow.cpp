@@ -186,9 +186,13 @@ void QZephyrWindow::waitScanoutReleased()
     if (m_buffers.size() < 2)
         return;
     const ScanoutBuffer &b = m_buffers[m_current];
+    QElapsedTimer clock;
+    clock.start();
     if (b.releasedAt != 0 && qzephyr_gl_vsync_count && qzephyr_gl_wait_vsync
         && int(qzephyr_gl_vsync_count() - b.releasedAt) < 0)
         qzephyr_gl_wait_vsync(b.releasedAt);
+    m_lastBufferWaitMs = clock.elapsed();
+    m_swapClock.start();   /* the GL work of this frame starts here */
 }
 
 // QZEPHYR_FRAME_LOG=1 (set by the Stage 2 main wrapper under
@@ -222,6 +226,7 @@ void QZephyrWindow::frameSwapped(EGLDisplay display)
     if (m_buffers.isEmpty())
         return;
     const int cur = m_current;
+    m_lastSwapMs = m_swapClock.isValid() ? m_swapClock.elapsed() : 0;
     if (frameLogEnabled()) {
         static unsigned frames = 0;
         static QElapsedTimer clock;
@@ -269,9 +274,21 @@ void QZephyrWindow::frameSwapped(EGLDisplay display)
     // per vsync would overrun the previous one.  QZEPHYR_NO_VSYNC=1
     // removes the wait for throughput measurements.
     static const bool noVsync = qEnvironmentVariableIsSet("QZEPHYR_NO_VSYNC");
+    QElapsedTimer vsyncClock;
+    if (frameLogEnabled())
+        vsyncClock.start();
     if (!noVsync && m_buffers.size() > 1 && window()->requestedFormat().swapInterval() != 0
         && qzephyr_gl_vsync_count && qzephyr_gl_wait_vsync)
         qzephyr_gl_wait_vsync(qzephyr_gl_vsync_count() + 1);
+    if (frameLogEnabled()) {
+        // Where a frame's wall clock goes: the wait for the buffer the display
+        // still holds, the GL work up to the swap, and the wait for the panel.
+        static unsigned n = 0;
+        if (++n % 60 == 1)
+            qDebug("QZephyrWindow: frame %u waits: buffer %lld ms, swap %lld ms, vsync %lld ms",
+                   n, (long long)m_lastBufferWaitMs, (long long)m_lastSwapMs,
+                   (long long)vsyncClock.elapsed());
+    }
 }
 
 void QZephyrWindow::presentPendingWhenDone()
