@@ -173,18 +173,37 @@ QAbstractEventDispatcher *QZephyrIntegration::createEventDispatcher() const
 }
 
 #ifdef QZEPHYR_WITH_EGL
+// The colour depth the EGL config must have for the scan-out buffers, when
+// the application leaves it open (every size -1, the default). EGL 1.5 3.4.1
+// sorts a smaller EGL_BUFFER_SIZE first when no colour size is requested, so
+// an unconstrained format gets a 16-bit config, and eglCreateWindowSurface
+// rightly refuses it for a 32-bit window with EGL_BAD_MATCH. eglfs adapts
+// the format the same way (QEglFSDeviceIntegration::surfaceFormatFor).
+static QSurfaceFormat withScreenDepth(QSurfaceFormat format, const QPlatformScreen *screen)
+{
+    if (format.redBufferSize() <= 0 && format.greenBufferSize() <= 0 && format.blueBufferSize() <= 0) {
+        const bool rgb565 = screen && screen->depth() <= 16;
+        format.setRedBufferSize(rgb565 ? 5 : 8);
+        format.setGreenBufferSize(rgb565 ? 6 : 8);
+        format.setBlueBufferSize(rgb565 ? 5 : 8);
+    }
+    return format;
+}
+
 QPlatformOpenGLContext *QZephyrIntegration::createPlatformOpenGLContext(QOpenGLContext *context) const
 {
     if (m_eglDisplay == EGL_NO_DISPLAY)
         return nullptr;
-    return new QZephyrGLContext(context->format(), context->shareHandle(), m_eglDisplay);
+    return new QZephyrGLContext(withScreenDepth(context->format(), m_primaryScreen), context->shareHandle(),
+                                m_eglDisplay);
 }
 
 QPlatformOffscreenSurface *QZephyrIntegration::createPlatformOffscreenSurface(QOffscreenSurface *surface) const
 {
     if (m_eglDisplay == EGL_NO_DISPLAY)
         return nullptr;
-    return new QEGLPbuffer(m_eglDisplay, surface->requestedFormat(), surface);
+    // the same depth as the contexts, so a context's config matches the pbuffer's
+    return new QEGLPbuffer(m_eglDisplay, withScreenDepth(surface->requestedFormat(), m_primaryScreen), surface);
 }
 
 void *QZephyrIntegration::nativeResourceForIntegration(const QByteArray &resource)
