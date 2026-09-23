@@ -6,6 +6,7 @@
 
 #include <QtCore/qcoreapplication.h>
 #include <QtCore/qsocketnotifier.h>
+#include <QtCore/qvarlengtharray.h>
 #include <QtCore/qthread.h>
 #include <QtCore/private/qcoreapplication_p.h>
 #include <QtCore/private/qthread_p.h>
@@ -19,6 +20,7 @@ extern "C" __attribute__((weak)) void qzephyr_drain_qpa_events();
 
 #include <zephyr/kernel.h>
 
+#include <poll.h>
 #include <chrono>
 #include <limits>
 
@@ -69,6 +71,13 @@ QEventDispatcherZephyrPrivate::~QEventDispatcherZephyrPrivate()
         delete info;
     }
     timerDict.clear();
+    // The dispatcher is being destroyed, so the kernel can no longer reach
+    // these timers -- the storage that was kept alive for recycling (retired
+    // but not-yet-recycled, plus the idle free pool) is finally released.
+    qDeleteAll(pendingRecycle);
+    pendingRecycle.clear();
+    qDeleteAll(freePool);
+    freePool.clear();
 }
 
 int QEventDispatcherZephyrPrivate::dispatchTimers()
@@ -111,6 +120,11 @@ bool QEventDispatcherZephyr::processEvents(QEventLoop::ProcessEventsFlags flags)
 {
     Q_D(QEventDispatcherZephyr);
 
+    // Quiescent point: recycle any timers retired during a previous iteration.
+    // By now k_timer_stop() has settled and no timer-ISR work references them,
+    // so their storage can safely re-enter the free pool for reuse.
+    d->recyclePending();
+
     if (d->interrupt.fetchAndStoreRelaxed(0))
         return false;
 
@@ -125,6 +139,7 @@ bool QEventDispatcherZephyr::processEvents(QEventLoop::ProcessEventsFlags flags)
     QCoreApplicationPrivate::sendPostedEvents(nullptr, 0, thisThreadData);
 
     int nevents = d->dispatchTimers();
+    nevents += d->activateSocketNotifiers();
 
     const bool canWait = (flags & QEventLoop::WaitForMoreEvents)
                          && !d->interrupt.loadRelaxed()
@@ -143,6 +158,16 @@ bool QEventDispatcherZephyr::processEvents(QEventLoop::ProcessEventsFlags flags)
             }
         }
 
+        // Bound the block to 50 ms.  QtQuick's basic render loop drives
+        // continuous animation by re-arming a short (~16 ms) update timer each
+        // frame; if that chain ever lapses, only the app's long-interval timers
+        // remain and the loop would sleep for seconds, so the UI updates only
+        // when an input (touch) happens to wake it.  Capping the wait makes the
+        // loop re-check ~20x/s, so animations advance and repaint without input.
+        const k_timeout_t cap = K_MSEC(50);
+        if (!haveTimerDeadline || wait_timeout.ticks > cap.ticks)
+            wait_timeout = cap;
+
         emit aboutToBlock();
 
         k_poll_event ev = d->wakeupEvent;
@@ -160,6 +185,7 @@ bool QEventDispatcherZephyr::processEvents(QEventLoop::ProcessEventsFlags flags)
             qzephyr_drain_qpa_events();
         QCoreApplicationPrivate::sendPostedEvents(nullptr, 0, thisThreadData);
         nevents += d->dispatchTimers();
+        nevents += d->activateSocketNotifiers();
     }
 
     return nevents > 0;
@@ -167,16 +193,59 @@ bool QEventDispatcherZephyr::processEvents(QEventLoop::ProcessEventsFlags flags)
 
 void QEventDispatcherZephyr::registerSocketNotifier(QSocketNotifier *notifier)
 {
-    // Zephyr's POSIX subset doesn't surface socket fds in a way that maps
-    // cleanly onto QSocketNotifier semantics.  Apps that need network IO
-    // go through Qt's high-level QNetwork* classes which do not depend on
-    // a working socket notifier on this platform.
-    Q_UNUSED(notifier);
+    Q_D(QEventDispatcherZephyr);
+    Q_ASSERT(notifier);
+    d->socketNotifiers.append(notifier);
 }
 
 void QEventDispatcherZephyr::unregisterSocketNotifier(QSocketNotifier *notifier)
 {
-    Q_UNUSED(notifier);
+    Q_D(QEventDispatcherZephyr);
+    d->socketNotifiers.removeOne(notifier);
+}
+
+int QEventDispatcherZephyrPrivate::activateSocketNotifiers()
+{
+    if (socketNotifiers.isEmpty())
+        return 0;
+
+    const int n = socketNotifiers.size();
+    QVarLengthArray<struct pollfd, 8> fds(n);
+    for (int i = 0; i < n; ++i) {
+        fds[i].fd = static_cast<int>(socketNotifiers[i]->socket());
+        fds[i].revents = 0;
+        switch (socketNotifiers[i]->type()) {
+        case QSocketNotifier::Read:
+            fds[i].events = POLLIN;
+            break;
+        case QSocketNotifier::Write:
+            fds[i].events = POLLOUT;
+            break;
+        case QSocketNotifier::Exception:
+            fds[i].events = POLLPRI;
+            break;
+        }
+    }
+
+    int ret = ::poll(fds.data(), n, 0);
+    if (ret <= 0)
+        return 0;
+
+    QVarLengthArray<QSocketNotifier *, 8> ready;
+    for (int i = 0; i < n; ++i) {
+        if (fds[i].revents != 0)
+            ready.append(socketNotifiers[i]);
+    }
+
+    int activated = 0;
+    for (QSocketNotifier *sn : ready) {
+        if (!socketNotifiers.contains(sn))
+            continue;
+        QEvent event(QEvent::SockAct);
+        QCoreApplication::sendEvent(sn, &event);
+        ++activated;
+    }
+    return activated;
 }
 
 void QEventDispatcherZephyr::registerTimer(Qt::TimerId timerId, Duration interval,
@@ -185,11 +254,12 @@ void QEventDispatcherZephyr::registerTimer(Qt::TimerId timerId, Duration interva
     Q_D(QEventDispatcherZephyr);
     Q_ASSERT(object);
 
-    auto *info = new ZephyrTimerInfo;
+    ZephyrTimerInfo *info = d->acquireTimerInfo();
     info->obj = object;
     info->timerId = timerId;
     info->interval = interval;
     info->timerType = timerType;
+    info->expired.storeRelaxed(0);
 
     k_timer_init(&info->timer, &QEventDispatcherZephyrPrivate::timerCallback, nullptr);
     k_timer_user_data_set(&info->timer, info);
@@ -209,14 +279,44 @@ void QEventDispatcherZephyr::registerTimer(Qt::TimerId timerId, Duration interva
     k_timer_start(&info->timer, K_MSEC(clamped), K_MSEC(clamped));
 }
 
+// Hand out storage for a new timer, reusing a recycled ZephyrTimerInfo when
+// one is idle so that timer memory is never round-tripped through the heap.
+ZephyrTimerInfo *QEventDispatcherZephyrPrivate::acquireTimerInfo()
+{
+    if (!freePool.isEmpty())
+        return freePool.takeLast();
+    return new ZephyrTimerInfo;
+}
+
+// Stop a timer and park its ZephyrTimerInfo for deferred recycling.  Reusing
+// the storage immediately would race the kernel timeout subsystem (the
+// embedded k_timer's _timeout dnode may still be touched right after stop);
+// recyclePending() returns it to the free pool at the top of the next
+// processEvents() iteration, a quiescent point on the dispatcher thread.  The
+// storage is never freed back to the heap, so even a stray late kernel write
+// only ever lands on an inert k_timer.
+void QEventDispatcherZephyrPrivate::retireTimer(ZephyrTimerInfo *info)
+{
+    k_timer_stop(&info->timer);
+    info->obj = nullptr;          // ignore any stray late expiry in dispatchTimers
+    pendingRecycle.append(info);
+}
+
+void QEventDispatcherZephyrPrivate::recyclePending()
+{
+    if (pendingRecycle.isEmpty())
+        return;
+    freePool.append(pendingRecycle);
+    pendingRecycle.clear();
+}
+
 bool QEventDispatcherZephyr::unregisterTimer(Qt::TimerId timerId)
 {
     Q_D(QEventDispatcherZephyr);
     ZephyrTimerInfo *info = d->timerDict.take(timerId);
     if (!info)
         return false;
-    k_timer_stop(&info->timer);
-    delete info;
+    d->retireTimer(info);
     return true;
 }
 
@@ -231,8 +331,7 @@ bool QEventDispatcherZephyr::unregisterTimers(QObject *object)
         ZephyrTimerInfo *info = d->timerDict.value(id);
         if (info && info->obj == object) {
             d->timerDict.remove(id);
-            k_timer_stop(&info->timer);
-            delete info;
+            d->retireTimer(info);
             any = true;
         }
     }
@@ -278,3 +377,12 @@ void QEventDispatcherZephyr::interrupt()
 }
 
 QT_END_NAMESPACE
+
+// Q_OBJECT lives in the _p.h private header; include its moc here so the
+// metaobject AND this polymorphic class's vtable (whose key function is
+// moc-generated) are emitted in this TU.  Matches the upstream idiom used by
+// qeventdispatcher_unix.cpp etc.  When qtbase builds this TU itself
+// (QT_DEFER_ZEPHYR_RUNTIME=OFF) its AUTOMOC produces the moc; in the deferred
+// Stage-2 Zephyr app build, where the app target's AUTOMOC is disabled, the
+// qt-zephyr-port module generates this moc explicitly (see its CMakeLists).
+#include "moc_qeventdispatcher_zephyr_p.cpp"

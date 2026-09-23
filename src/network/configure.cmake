@@ -240,9 +240,14 @@ qt_feature("schannel" PUBLIC
     DISABLE INPUT_ssl STREQUAL 'no'
 )
 qt_feature_definition("schannel" "QT_SCHANNEL")
+qt_feature("wolfssl" PUBLIC
+    LABEL "wolfSSL"
+    CONDITION WOLFSSL_PREFIX
+    DISABLE INPUT_ssl STREQUAL 'no'
+)
 qt_feature("ssl" PUBLIC
     LABEL "SSL"
-    CONDITION QT_FEATURE_securetransport OR QT_FEATURE_openssl OR QT_FEATURE_schannel
+    CONDITION QT_FEATURE_securetransport OR QT_FEATURE_openssl OR QT_FEATURE_schannel OR QT_FEATURE_wolfssl
 )
 qt_feature_definition("ssl" "QT_NO_SSL" NEGATE VALUE "1")
 qt_feature("dtls" PUBLIC
