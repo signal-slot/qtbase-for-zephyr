@@ -40,6 +40,9 @@ QZephyrScreen::QZephyrScreen()
     case QImage::Format_RGB888:    m_depth = 24; break;
     case QImage::Format_ARGB32:
     case QImage::Format_ARGB32_Premultiplied:
+    case QImage::Format_RGBX8888:
+    case QImage::Format_RGBA8888:
+    case QImage::Format_RGBA8888_Premultiplied:
     case QImage::Format_RGB32:     m_depth = 32; break;
     case QImage::Format_RGB16:
     default:                       m_depth = 16; break;
