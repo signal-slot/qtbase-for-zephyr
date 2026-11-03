@@ -14,3 +14,6 @@ if (QT_FEATURE_schannel AND QT_FEATURE_ssl)
 endif()
 
 add_subdirectory(certonly)
+
+# wolfSSL TLS backend — the wolfssl/CMakeLists.txt self-gates on WOLFSSL_PREFIX
+add_subdirectory(wolfssl)

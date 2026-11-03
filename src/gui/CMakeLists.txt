@@ -1084,6 +1084,11 @@ qt_internal_extend_target(Gui CONDITION WASM
         platform/wasm/qwasmlocalfileaccess.cpp platform/wasm/qwasmlocalfileaccess_p.h
 )
 
+qt_internal_extend_target(Gui CONDITION ZEPHYR AND QT_FEATURE_egl
+    SOURCES
+        platform/zephyr/qzephyrnativeinterface.cpp
+)
+
 qt_internal_extend_target(Gui CONDITION UNIX
     SOURCES
         platform/unix/qunixnativeinterface.cpp

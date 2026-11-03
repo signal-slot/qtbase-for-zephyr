@@ -437,12 +437,18 @@ bool QNativeSocketEngine::initialize(QAbstractSocket::SocketType socketType, QAb
         // Set the broadcasting flag if it's a UDP socket.
         // IPv6 does not support broadcast — only set option for IPv4
         if (protocol != QAbstractSocket::IPv6Protocol) {
+#ifdef Q_OS_ZEPHYR
+            // Zephyr's setsockopt does not implement SO_BROADCAST;
+            // broadcast sendto() works without it, so accept failure.
+            setOption(BroadcastSocketOption, 1);
+#else
             if (!setOption(BroadcastSocketOption, 1)) {
                 d->setError(QAbstractSocket::UnsupportedSocketOperationError,
                             QNativeSocketEnginePrivate::BroadcastingInitFailedErrorString);
                 close();
                 return false;
             }
+#endif
         }
 
         // Set some extra flags that are interesting to us, but accept failure
@@ -516,12 +522,17 @@ bool QNativeSocketEngine::initialize(qintptr socketDescriptor, QAbstractSocket::
 
         // Set the broadcasting flag if it's a UDP socket.
         if (d->socketType == QAbstractSocket::UdpSocket
-            && d->socketProtocol != QAbstractSocket::IPv6Protocol
-            && !setOption(BroadcastSocketOption, 1)) {
-            d->setError(QAbstractSocket::UnsupportedSocketOperationError,
-                QNativeSocketEnginePrivate::BroadcastingInitFailedErrorString);
-            close();
-            return false;
+            && d->socketProtocol != QAbstractSocket::IPv6Protocol) {
+#ifdef Q_OS_ZEPHYR
+            setOption(BroadcastSocketOption, 1);
+#else
+            if (!setOption(BroadcastSocketOption, 1)) {
+                d->setError(QAbstractSocket::UnsupportedSocketOperationError,
+                    QNativeSocketEnginePrivate::BroadcastingInitFailedErrorString);
+                close();
+                return false;
+            }
+#endif
         }
     }
 

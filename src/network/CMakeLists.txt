@@ -193,7 +193,7 @@ qt_internal_extend_target(Network CONDITION QT_FEATURE_dnslookup
         kernel/qdnslookup.cpp kernel/qdnslookup.h kernel/qdnslookup_p.h
 )
 
-qt_internal_extend_target(Network CONDITION UNIX
+qt_internal_extend_target(Network CONDITION UNIX OR CMAKE_SYSTEM_NAME STREQUAL "Zephyr"
     SOURCES
         kernel/qhostinfo_unix.cpp
         socket/qnativesocketengine_unix.cpp
@@ -208,6 +208,11 @@ qt_internal_extend_target(Network CONDITION QT_FEATURE_linux_netlink AND UNIX
 qt_internal_extend_target(Network CONDITION UNIX AND NOT QT_FEATURE_linux_netlink
     SOURCES
         kernel/qnetworkinterface_unix.cpp
+)
+
+qt_internal_extend_target(Network CONDITION CMAKE_SYSTEM_NAME STREQUAL "Zephyr"
+    SOURCES
+        kernel/qnetworkinterface_zephyr.cpp
 )
 
 qt_internal_extend_target(Network CONDITION WIN32

@@ -11,6 +11,10 @@
 #include "private/qcoreapplication_p.h"
 #include "qeventloop.h"
 #include "qmutex.h"
+#ifdef Q_OS_ZEPHYR
+#include <errno.h>
+#include <time.h>
+#endif
 
 QT_BEGIN_NAMESPACE
 
@@ -1217,6 +1221,21 @@ uint QThread::stackSize() const
 {
     return 0;
 }
+
+#ifdef Q_OS_ZEPHYR
+// The threaded builds get this from qthread_unix.cpp / qthread_win.cpp; a
+// no-thread build has no definition at all, and Qt code still calls it
+// (QLockFile::tryLock, QTest).  Zephyr's POSIX subsystem provides nanosleep.
+void QThread::sleep(std::chrono::nanoseconds nsec)
+{
+    using namespace std::chrono;
+    const auto secs = duration_cast<seconds>(nsec);
+    struct timespec ts;
+    ts.tv_sec = time_t(secs.count());
+    ts.tv_nsec = long((nsec - secs).count());
+    while (::nanosleep(&ts, &ts) == -1 && errno == EINTR) { }
+}
+#endif
 
 #endif // QT_CONFIG(thread)
 

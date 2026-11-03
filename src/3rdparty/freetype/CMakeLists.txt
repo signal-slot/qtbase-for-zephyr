@@ -82,7 +82,8 @@ qt_internal_add_3rdparty_header_module(FreetypePrivate
 qt_disable_warnings(BundledFreetype)
 qt_set_symbol_visibility_hidden(BundledFreetype)
 
-qt_internal_extend_target(BundledFreetype CONDITION WIN32
+qt_internal_extend_target(BundledFreetype
+    CONDITION WIN32 OR CMAKE_SYSTEM_NAME STREQUAL "Zephyr"
     SOURCES
         src/base/ftsystem.c
 )
