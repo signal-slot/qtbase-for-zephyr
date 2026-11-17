@@ -104,6 +104,14 @@ public:
     k_poll_signal wakeupSignal{};
     k_poll_event wakeupEvent{};
 
+#ifdef CONFIG_QT_EVENT_DISPATCHER_WAIT_ON_SOCKETS
+    // eventfd that wakeUp() writes; processEvents() waits on it and on the
+    // socket notifiers with one poll().
+    int wakeFd = -1;
+    bool pollFailureReported = false;
+    void waitForEvents(int timeoutMs);
+#endif
+
     QAtomicInt interrupt{0};
     QAtomicInt wakeupRaised{0};
 
