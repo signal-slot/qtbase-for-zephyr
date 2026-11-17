@@ -19,6 +19,11 @@
 extern "C" __attribute__((weak)) void qzephyr_drain_qpa_events();
 
 #include <zephyr/kernel.h>
+#ifdef CONFIG_QT_EVENT_DISPATCHER_WAIT_ON_SOCKETS
+#include <errno.h>
+#include <zephyr/sys/fdtable.h>
+#include <zephyr/zvfs/eventfd.h>
+#endif
 
 #include <poll.h>
 #include <chrono>
@@ -62,10 +67,24 @@ QEventDispatcherZephyrPrivate::QEventDispatcherZephyrPrivate()
     k_poll_signal_init(&wakeupSignal);
     k_poll_event_init(&wakeupEvent, K_POLL_TYPE_SIGNAL,
                       K_POLL_MODE_NOTIFY_ONLY, &wakeupSignal);
+#ifdef CONFIG_QT_EVENT_DISPATCHER_WAIT_ON_SOCKETS
+    // Wake-up via an eventfd, so that poll() can wait for it and for the
+    // sockets at the same time.  NONBLOCK: wakeUp() never waits for a full
+    // counter.  Note that zvfs_eventfd_write() takes a mutex, so wakeUp()
+    // cannot be called from an ISR with this option.
+    wakeFd = zvfs_eventfd(0, ZVFS_EFD_NONBLOCK);
+    if (wakeFd < 0)
+        qWarning("QEventDispatcherZephyr: zvfs_eventfd() failed (errno %d); "
+                 "check CONFIG_ZVFS_EVENTFD_MAX.  Waits are polled every 5 ms.", errno);
+#endif
 }
 
 QEventDispatcherZephyrPrivate::~QEventDispatcherZephyrPrivate()
 {
+#ifdef CONFIG_QT_EVENT_DISPATCHER_WAIT_ON_SOCKETS
+    if (wakeFd >= 0)
+        zvfs_close(wakeFd);
+#endif
     for (ZephyrTimerInfo *info : std::as_const(timerDict)) {
         k_timer_stop(&info->timer);
         delete info;
@@ -170,6 +189,9 @@ bool QEventDispatcherZephyr::processEvents(QEventLoop::ProcessEventsFlags flags)
 
         emit aboutToBlock();
 
+#ifdef CONFIG_QT_EVENT_DISPATCHER_WAIT_ON_SOCKETS
+        d->waitForEvents(static_cast<int>(k_ticks_to_ms_ceil32(wait_timeout.ticks)));
+#else
         k_poll_event ev = d->wakeupEvent;
         ev.state = K_POLL_STATE_NOT_READY;
         k_poll(&ev, 1, wait_timeout);
@@ -178,6 +200,7 @@ bool QEventDispatcherZephyr::processEvents(QEventLoop::ProcessEventsFlags flags)
             k_poll_signal_reset(&d->wakeupSignal);
             d->wakeupRaised.storeRelaxed(0);
         }
+#endif
 
         emit awake();
 
@@ -203,6 +226,64 @@ void QEventDispatcherZephyr::unregisterSocketNotifier(QSocketNotifier *notifier)
     Q_D(QEventDispatcherZephyr);
     d->socketNotifiers.removeOne(notifier);
 }
+
+#ifdef CONFIG_QT_EVENT_DISPATCHER_WAIT_ON_SOCKETS
+// Block until the wake-up eventfd or any registered socket is ready, or
+// timeoutMs passes.  Only waits; activateSocketNotifiers() still decides
+// what to deliver.
+void QEventDispatcherZephyrPrivate::waitForEvents(int timeoutMs)
+{
+    if (wakeFd < 0) {
+        // No eventfd (see the constructor): poll for wake-ups every few ms.
+        k_msleep(qMin(timeoutMs, 5));
+        return;
+    }
+    const int n = socketNotifiers.size();
+    QVarLengthArray<struct pollfd, 9> fds(n + 1);
+    fds[0].fd = wakeFd;
+    fds[0].events = POLLIN;
+    fds[0].revents = 0;
+    for (int i = 0; i < n; ++i) {
+        fds[i + 1].fd = static_cast<int>(socketNotifiers[i]->socket());
+        fds[i + 1].revents = 0;
+        switch (socketNotifiers[i]->type()) {
+        case QSocketNotifier::Read:
+            fds[i + 1].events = POLLIN;
+            break;
+        case QSocketNotifier::Write:
+            fds[i + 1].events = POLLOUT;
+            break;
+        case QSocketNotifier::Exception:
+            fds[i + 1].events = POLLPRI;
+            break;
+        }
+    }
+
+    const int ret = ::poll(fds.data(), n + 1, timeoutMs);
+    if (ret < 0) {
+        // Typically ENOMEM: CONFIG_ZVFS_POLL_MAX is smaller than the number of
+        // notifiers plus one.  Say so once, and do not spin.
+        if (!pollFailureReported) {
+            pollFailureReported = true;
+            qWarning("QEventDispatcherZephyr: poll() failed (errno %d) with %d descriptors; "
+                     "CONFIG_ZVFS_POLL_MAX may be too small", errno, n + 1);
+        }
+        k_msleep(qMin(timeoutMs, 5));
+        return;
+    }
+    if (fds[0].revents & POLLIN) {
+        // Drain the eventfd first, then clear the coalescing flag (the order
+        // the k_poll version used for its signal).  A wakeUp() between the two
+        // steps sees the flag still set and writes nothing; what it announced is
+        // delivered by the posted-event pass that follows this wait.  With the
+        // opposite order the flag could stay set with an empty eventfd, and
+        // every later wakeUp() would then be suppressed.
+        zvfs_eventfd_t v;
+        zvfs_eventfd_read(wakeFd, &v);
+        wakeupRaised.storeRelaxed(0);
+    }
+}
+#endif // CONFIG_QT_EVENT_DISPATCHER_WAIT_ON_SOCKETS
 
 int QEventDispatcherZephyrPrivate::activateSocketNotifiers()
 {
@@ -366,7 +447,12 @@ void QEventDispatcherZephyr::wakeUp()
     Q_D(QEventDispatcherZephyr);
     // Coalesce repeated wakeUp() calls between processEvents() iterations.
     if (d->wakeupRaised.fetchAndStoreRelaxed(1) == 0)
+#ifdef CONFIG_QT_EVENT_DISPATCHER_WAIT_ON_SOCKETS
+        if (d->wakeFd >= 0)
+            zvfs_eventfd_write(d->wakeFd, 1);
+#else
         k_poll_signal_raise(&d->wakeupSignal, 1);
+#endif
 }
 
 void QEventDispatcherZephyr::interrupt()
